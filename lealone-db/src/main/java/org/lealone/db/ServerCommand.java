@@ -22,11 +22,10 @@ import java.util.ArrayList;
 
 import org.lealone.db.result.Result;
 import org.lealone.db.value.ValueLong;
-import org.lealone.replication.Replication;
+import org.lealone.storage.LeafPageMovePlan;
 import org.lealone.storage.StorageCommand;
 import org.lealone.storage.StorageMap;
 import org.lealone.storage.type.WriteBuffer;
-import org.lealone.storage.type.WriteBufferPool;
 import org.lealone.transaction.Transaction;
 
 public class ServerCommand extends CommandBase implements StorageCommand {
@@ -86,22 +85,39 @@ public class ServerCommand extends CommandBase implements StorageCommand {
     }
 
     @Override
-    public Object executePut(String replicationName, String mapName, ByteBuffer key, ByteBuffer value) {
+    public LeafPageMovePlan prepareMoveLeafPage(String mapName, LeafPageMovePlan leafPageMovePlan) {
+        StorageMap<Object, Object> map = session.getStorageMap(mapName);
+        return map.prepareMoveLeafPage(leafPageMovePlan);
+    }
+
+    @Override
+    public void moveLeafPage(String mapName, ByteBuffer splitKey, ByteBuffer page) {
+        StorageMap<Object, Object> map = session.getStorageMap(mapName);
+        map.addLeafPage(splitKey, page);
+    }
+
+    @Override
+    public void removeLeafPage(String mapName, ByteBuffer key) {
+        StorageMap<Object, Object> map = session.getStorageMap(mapName);
+        map.removeLeafPage(key);
+    }
+
+    @Override
+    public Object executePut(String replicationName, String mapName, ByteBuffer key, ByteBuffer value, boolean raw) {
         session.setReplicationName(replicationName);
         StorageMap<Object, Object> map = session.getStorageMap(mapName);
+        if (raw) {
+            map = map.getRawMap();
+        }
         Object result = map.put(map.getKeyType().read(key), map.getValueType().read(value));
 
         if (result == null)
             return null;
-        WriteBuffer writeBuffer = WriteBufferPool.poll();
-        map.getValueType().write(writeBuffer, result);
-        ByteBuffer buffer = writeBuffer.getBuffer();
-        buffer.flip();
-        ByteBuffer valueBuffer = ByteBuffer.allocate(buffer.limit());
-        valueBuffer.put(buffer);
-        valueBuffer.flip();
-        WriteBufferPool.offer(writeBuffer);
-        return valueBuffer.array();
+
+        try (WriteBuffer b = WriteBuffer.create()) {
+            ByteBuffer valueBuffer = b.write(map.getValueType(), result);
+            return valueBuffer.array();
+        }
     }
 
     @Override
@@ -109,27 +125,6 @@ public class ServerCommand extends CommandBase implements StorageCommand {
         StorageMap<Object, Object> map = session.getStorageMap(mapName);
         Object result = map.get(map.getKeyType().read(key));
         return result;
-    }
-
-    @Override
-    public void moveLeafPage(String mapName, ByteBuffer splitKey, ByteBuffer page) {
-        StorageMap<Object, Object> map = session.getStorageMap(mapName);
-        if (map instanceof Replication) {
-            ((Replication) map).addLeafPage(splitKey, page);
-        }
-    }
-
-    @Override
-    public void removeLeafPage(String mapName, ByteBuffer key) {
-        StorageMap<Object, Object> map = session.getStorageMap(mapName);
-        if (map instanceof Replication) {
-            ((Replication) map).removeLeafPage(key);
-        }
-    }
-
-    @Override
-    public Command prepare() {
-        return this;
     }
 
     @Override

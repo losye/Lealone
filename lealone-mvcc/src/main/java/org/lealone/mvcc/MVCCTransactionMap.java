@@ -5,18 +5,14 @@
  */
 package org.lealone.mvcc;
 
-import java.io.IOException;
-import java.nio.channels.ReadableByteChannel;
-import java.nio.channels.WritableByteChannel;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Map.Entry;
 
 import org.lealone.common.util.DataUtils;
-import org.lealone.db.ConnectionInfo;
 import org.lealone.db.Session;
 import org.lealone.mvcc.MVCCTransaction.LogRecord;
-import org.lealone.replication.Replication;
+import org.lealone.storage.DelegatedStorageMap;
 import org.lealone.storage.Storage;
 import org.lealone.storage.StorageMap;
 import org.lealone.storage.StorageMapCursor;
@@ -34,38 +30,35 @@ import org.lealone.transaction.TransactionMap;
  * @author H2 Group
  * @author zhh
  */
-public class MVCCTransactionMap<K, V> implements TransactionMap<K, V> {
+public class MVCCTransactionMap<K, V> extends DelegatedStorageMap<K, V> implements TransactionMap<K, V> {
 
-    public static class MVCCShardingTransactionMap<K, V> extends MVCCTransactionMap<K, V> {
+    static class MVCCReplicationMap<K, V> extends MVCCTransactionMap<K, V> {
 
-        private final Replication replication;
         private final Session session;
         private final DataType valueType;
 
-        public MVCCShardingTransactionMap(MVCCTransaction transaction, StorageMap<K, TransactionalValue> map) {
+        MVCCReplicationMap(MVCCTransaction transaction, StorageMap<K, TransactionalValue> map) {
             super(transaction, map);
-            replication = (Replication) map;
             session = transaction.getSession();
             valueType = getValueType();
-            ConnectionInfo.setInternalSession(session);
         }
 
         @SuppressWarnings("unchecked")
         @Override
         public V get(K key) {
-            return (V) replication.get(key, session);
+            return (V) map.replicationGet(session, key);
         }
 
         @SuppressWarnings("unchecked")
         @Override
         public V put(K key, V value) {
-            return (V) replication.put(key, value, valueType, session);
+            return (V) map.replicationPut(session, key, value, valueType);
         }
 
         @SuppressWarnings("unchecked")
         @Override
         public K append(V value) {
-            return (K) replication.append(value, valueType, session);
+            return (K) map.replicationAppend(session, value, valueType);
         }
     }
 
@@ -79,19 +72,11 @@ public class MVCCTransactionMap<K, V> implements TransactionMap<K, V> {
      */
     protected final StorageMap<K, TransactionalValue> map;
 
+    @SuppressWarnings("unchecked")
     public MVCCTransactionMap(MVCCTransaction transaction, StorageMap<K, TransactionalValue> map) {
+        super((StorageMap<K, V>) map);
         this.transaction = transaction;
         this.map = map;
-    }
-
-    @Override
-    public String getName() {
-        return map.getName();
-    }
-
-    @Override
-    public DataType getKeyType() {
-        return map.getKeyType();
     }
 
     @Override
@@ -517,36 +502,6 @@ public class MVCCTransactionMap<K, V> implements TransactionMap<K, V> {
         }
     }
 
-    @Override
-    public boolean isClosed() {
-        return map.isClosed();
-    }
-
-    @Override
-    public void close() {
-        map.close();
-    }
-
-    @Override
-    public void save() {
-        map.save();
-    }
-
-    @Override
-    public void transferTo(WritableByteChannel target, K firstKey, K lastKey) throws IOException {
-        map.transferTo(target, firstKey, lastKey);
-    }
-
-    @Override
-    public void transferFrom(ReadableByteChannel src) throws IOException {
-        map.transferFrom(src);
-    }
-
-    @Override
-    public Storage getStorage() {
-        return map.getStorage();
-    }
-
     @SuppressWarnings("unchecked")
     @Override
     public K append(V value) { // 追加新记录时不会产生事务冲突
@@ -572,7 +527,7 @@ public class MVCCTransactionMap<K, V> implements TransactionMap<K, V> {
     public MVCCTransactionMap<K, V> getInstance(Transaction transaction) {
         MVCCTransaction t = (MVCCTransaction) transaction;
         if (t.isShardingMode())
-            return new MVCCShardingTransactionMap<>(t, map);
+            return new MVCCReplicationMap<>(t, map);
         else
             return new MVCCTransactionMap<>(t, map);
     }
@@ -732,4 +687,5 @@ public class MVCCTransactionMap<K, V> implements TransactionMap<K, V> {
             }
         };
     }
+
 }

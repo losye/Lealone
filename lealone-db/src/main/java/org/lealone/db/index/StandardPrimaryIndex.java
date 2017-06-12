@@ -66,7 +66,6 @@ public class StandardPrimaryIndex extends IndexBase {
 
         Storage storage = database.getStorage(table.getStorageEngine());
         TransactionEngine transactionEngine = database.getTransactionEngine();
-        boolean isShardingMode = session.isShardingMode();
 
         String initReplicationEndpoints = null;
         String replicationName = session.getReplicationName();
@@ -76,8 +75,11 @@ public class StandardPrimaryIndex extends IndexBase {
                 initReplicationEndpoints = replicationName.substring(0, pos);
             }
         }
-        dataMap = transactionEngine.beginTransaction(false, isShardingMode).openMap(mapName, table.getMapType(),
-                keyType, vvType, storage, isShardingMode, initReplicationEndpoints);
+
+        // session.isShardingMode()是针对当前session的，如果是SystemSession，就算数据库是ShardingMode，也不管它
+        dataMap = transactionEngine.beginTransaction(false, session.isShardingMode()).openMap(mapName,
+                table.getMapType(), keyType, vvType, storage, session.getDatabase().isShardingMode(),
+                initReplicationEndpoints);
         transactionEngine.addTransactionMap(dataMap);
     }
 
@@ -216,14 +218,12 @@ public class StandardPrimaryIndex extends IndexBase {
                 max = v;
             }
         }
-        TransactionMap<Value, VersionedValue> map = getMap(session);
-        return new StandardPrimaryIndexCursor(session, table, this, map.entryIterator(min), max);
+        return new StandardPrimaryIndexCursor(session, table, this, getMap(session).entryIterator(min), max);
     }
 
     @Override
     public Row getRow(ServerSession session, long key) {
-        TransactionMap<Value, VersionedValue> map = getMap(session);
-        VersionedValue v = map.get(ValueLong.get(key));
+        VersionedValue v = getMap(session).get(ValueLong.get(key));
         ValueArray array = v.value;
         Row row = new Row(array.getList(), 0);
         row.setKey(key);
@@ -256,11 +256,10 @@ public class StandardPrimaryIndex extends IndexBase {
 
     @Override
     public void truncate(ServerSession session) {
-        TransactionMap<Value, VersionedValue> map = getMap(session);
         if (table.getContainsLargeObject()) {
             database.getLobStorage().removeAllForTable(table.getId());
         }
-        map.clear();
+        getMap(session).clear();
     }
 
     @Override
@@ -291,8 +290,7 @@ public class StandardPrimaryIndex extends IndexBase {
 
     @Override
     public long getRowCount(ServerSession session) {
-        TransactionMap<Value, VersionedValue> map = getMap(session);
-        return map.sizeAsLong();
+        return getMap(session).sizeAsLong();
     }
 
     /**
@@ -349,8 +347,7 @@ public class StandardPrimaryIndex extends IndexBase {
      * @return the cursor
      */
     Cursor find(ServerSession session, ValueLong first, ValueLong last) {
-        TransactionMap<Value, VersionedValue> map = getMap(session);
-        return new StandardPrimaryIndexCursor(session, table, this, map.entryIterator(first), last);
+        return new StandardPrimaryIndexCursor(session, table, this, getMap(session).entryIterator(first), last);
     }
 
     @Override

@@ -15,26 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lealone.storage;
+package org.lealone.replication;
 
-import java.nio.ByteBuffer;
+import java.util.List;
 
-import org.lealone.db.Command;
-import org.lealone.db.CommandUpdateResult;
+import org.lealone.db.Session;
+import org.lealone.net.NetEndpoint;
+import org.lealone.storage.type.DataType;
 
-public interface StorageCommand extends Command, AutoCloseable {
+public interface ReplicationMap {
 
-    Object executePut(String replicationName, String mapName, ByteBuffer key, ByteBuffer value, boolean raw);
+    List<NetEndpoint> getReplicationEndpoints(Object key);
 
-    Object executeGet(String mapName, ByteBuffer key);
+    Object replicationPut(Session session, Object key, Object value, DataType valueType);
 
-    LeafPageMovePlan prepareMoveLeafPage(String mapName, LeafPageMovePlan leafPageMovePlan);
+    Object replicationGet(Session session, Object key);
 
-    void moveLeafPage(String mapName, ByteBuffer splitKey, ByteBuffer page);
-
-    void removeLeafPage(String mapName, ByteBuffer key);
-
-    Object executeAppend(String replicationName, String mapName, ByteBuffer value,
-            CommandUpdateResult commandUpdateResult);
+    Object replicationAppend(Session session, Object value, DataType valueType);
 
 }

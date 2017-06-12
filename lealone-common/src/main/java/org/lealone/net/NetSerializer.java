@@ -15,28 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lealone.replication;
+package org.lealone.net;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.List;
 
-import org.lealone.db.Session;
-import org.lealone.net.NetEndpoint;
-import org.lealone.storage.type.DataType;
+public interface NetSerializer {
 
-public interface Replication {
+    NetSerializer writeInt(int x) throws IOException;
 
-    List<NetEndpoint> getReplicationEndpoints(Object key);
+    NetSerializer writeString(String s) throws IOException;
 
-    NetEndpoint getLocalEndpoint();
+    NetSerializer writeByteBuffer(ByteBuffer data) throws IOException;
 
-    Object put(Object key, Object value, DataType valueType, Session session);
+    int readInt() throws IOException;
 
-    Object get(Object key, Session session);
+    String readString() throws IOException;
 
-    void addLeafPage(ByteBuffer splitKey, ByteBuffer page);
+    ByteBuffer readByteBuffer() throws IOException;
 
-    void removeLeafPage(ByteBuffer key);
-
-    Object append(Object value, DataType valueType, Session session);
 }

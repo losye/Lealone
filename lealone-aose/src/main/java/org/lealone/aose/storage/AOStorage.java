@@ -17,21 +17,23 @@
  */
 package org.lealone.aose.storage;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import org.lealone.aose.storage.btree.BTreeMap;
 import org.lealone.aose.storage.rtree.RTreeMap;
+import org.lealone.common.exceptions.DbException;
 import org.lealone.common.util.DataUtils;
-import org.lealone.db.Constants;
-import org.lealone.storage.Storage;
+import org.lealone.common.util.IOUtils;
+import org.lealone.storage.StorageBase;
 import org.lealone.storage.StorageMap;
 import org.lealone.storage.fs.FilePath;
 import org.lealone.storage.fs.FileUtils;
-import org.lealone.storage.memory.MemoryMap;
 import org.lealone.storage.type.DataType;
 
 /**
@@ -39,18 +41,12 @@ import org.lealone.storage.type.DataType;
  * 
  * @author zhh
  */
-public class AOStorage implements Storage {
+public class AOStorage extends StorageBase {
 
     public static final String SUFFIX_AO_FILE = ".db";
     public static final int SUFFIX_AO_FILE_LENGTH = SUFFIX_AO_FILE.length();
 
-    private static final String TEMP_NAME_PREFIX = "temp" + Constants.NAME_SEPARATOR;
-
-    private final ConcurrentHashMap<String, StorageMap<?, ?>> maps = new ConcurrentHashMap<>();
     private final Map<String, Object> config;
-
-    private boolean closed;
-    private int nextTemporaryMapId;
 
     AOStorage(Map<String, Object> config) {
         this.config = config;
@@ -67,24 +63,18 @@ public class AOStorage implements Storage {
         }
     }
 
-    public void closeMap(String name) {
-        maps.remove(name);
-    }
-
-    @SuppressWarnings("unchecked")
-    public synchronized <M extends StorageMap<K, V>, K, V> M openMap(String name, StorageMapBuilder<M, K, V> builder,
+    @Override
+    public <K, V> StorageMap<K, V> openMap(String name, String mapType, DataType keyType, DataType valueType,
             Map<String, String> parameters) {
-        M map = (M) maps.get(name);
-        if (map == null) {
-            HashMap<String, Object> c = new HashMap<>(config);
-            if (parameters != null)
-                c.putAll(parameters);
-            builder.name(name).config(c).aoStorage(this);
-            map = builder.openMap();
-            maps.put(name, map);
+        if (mapType == null || mapType.equalsIgnoreCase("AOMap")) {
+            return openAOMap(name, keyType, valueType, parameters);
+        } else if (mapType.equalsIgnoreCase("BTreeMap")) {
+            return openBTreeMap(name, keyType, valueType, parameters);
+        } else if (mapType.equalsIgnoreCase("BufferedMap")) {
+            return openBufferedMap(name, keyType, valueType, parameters);
+        } else {
+            throw DataUtils.newIllegalArgumentException("Unknow map type: {0}", mapType);
         }
-
-        return map;
     }
 
     public <K, V> BTreeMap<K, V> openBTreeMap(String name) {
@@ -106,114 +96,74 @@ public class AOStorage implements Storage {
         return openMap(name, builder, null);
     }
 
-    public <K, V> AOMap<K, V> openAOMap(String name, DataType keyType, DataType valueType) {
-        BTreeMap<K, V> btreeMap = openBTreeMap(name, keyType, valueType, null);
+    public <K, V> AOMap<K, V> openAOMap(String name, DataType keyType, DataType valueType,
+            Map<String, String> parameters) {
+        BTreeMap<K, V> btreeMap = openBTreeMap(name, keyType, valueType, parameters);
         AOMap<K, V> map = new AOMap<>(btreeMap);
         AOStorageService.addAOMap(map);
         return map;
     }
 
-    public <K, V> BufferedMap<K, V> openBufferedMap(String name, DataType keyType, DataType valueType) {
-        BTreeMap<K, V> btreeMap = openBTreeMap(name, keyType, valueType, null);
+    public <K, V> BufferedMap<K, V> openBufferedMap(String name, DataType keyType, DataType valueType,
+            Map<String, String> parameters) {
+        BTreeMap<K, V> btreeMap = openBTreeMap(name, keyType, valueType, parameters);
         BufferedMap<K, V> map = new BufferedMap<>(btreeMap);
         AOStorageService.addBufferedMap(map);
         return map;
     }
 
-    public <K, V> MemoryMap<K, V> openMemoryMap(String name, DataType keyType, DataType valueType) {
-        MemoryMapBuilder<K, V> builder = new MemoryMapBuilder<>();
-        builder.keyType(keyType);
-        builder.valueType(valueType);
-        return openMap(name, builder, null);
-    }
-
-    private static class MemoryMapBuilder<K, V> extends StorageMapBuilder<MemoryMap<K, V>, K, V> {
-        @Override
-        public MemoryMap<K, V> openMap() {
-            return new MemoryMap<>(name, keyType, valueType);
+    @SuppressWarnings("unchecked")
+    private <M extends StorageMap<K, V>, K, V> M openMap(String name, StorageMapBuilder<M, K, V> builder,
+            Map<String, String> parameters) {
+        M map = (M) maps.get(name);
+        if (map == null) {
+            synchronized (this) {
+                map = (M) maps.get(name);
+                if (map == null) {
+                    HashMap<String, Object> c = new HashMap<>(config);
+                    if (parameters != null)
+                        c.putAll(parameters);
+                    builder.name(name).config(c).aoStorage(this);
+                    map = builder.openMap();
+                    maps.put(name, map);
+                }
+            }
         }
+        return map;
     }
 
     public boolean isReadOnly() {
         return config.containsKey("readOnly");
     }
 
-    public Set<String> getMapNames() {
-        return new HashSet<String>(maps.keySet());
-    }
-
     @Override
-    public <K, V> StorageMap<K, V> openMap(String name, String mapType, DataType keyType, DataType valueType,
-            Map<String, String> parameters) {
-        if (mapType == null || mapType.equalsIgnoreCase("AOMap")) {
-            return openAOMap(name, keyType, valueType);
-        } else if (mapType.equalsIgnoreCase("BTreeMap")) {
-            return openBTreeMap(name, keyType, valueType, parameters);
-        } else if (mapType.equalsIgnoreCase("BufferedMap")) {
-            return openBufferedMap(name, keyType, valueType);
-        } else if (mapType.equalsIgnoreCase("MemoryMap")) {
-            return openMemoryMap(name, keyType, valueType);
-        } else {
-            throw DataUtils.newIllegalArgumentException("Unknow map type: {0}", mapType);
+    public void backupTo(String fileName) {
+        try {
+            save();
+            close(); // TODO 如何在不关闭存储的情况下备份，现在每个文件与FileStorage相关的在打开时就用排它锁锁住了，所以读不了
+            OutputStream zip = FileUtils.newOutputStream(fileName, false);
+            ZipOutputStream out = new ZipOutputStream(zip);
+            String storageName = (String) config.get("storageName");
+            String storageShortName = storageName.replace('\\', '/');
+            storageShortName = storageShortName.substring(storageShortName.lastIndexOf('/') + 1);
+            FilePath dir = FilePath.get(storageName);
+            for (FilePath map : dir.newDirectoryStream()) {
+                String entryNameBase = storageShortName + "/" + map.getName();
+                for (FilePath file : map.newDirectoryStream()) {
+                    backupFile(out, file.newInputStream(), entryNameBase + "/" + file.getName());
+                }
+            }
+            out.close();
+            zip.close();
+        } catch (IOException e) {
+            throw DbException.convertIOException(e, fileName);
         }
     }
 
-    @Override
-    public synchronized String nextTemporaryMapName() {
-        return TEMP_NAME_PREFIX + nextTemporaryMapId++;
-    }
-
-    @Override
-    public StorageMap<?, ?> getStorageMap(String name) {
-        return maps.get(name);
-    }
-
-    @Override
-    public boolean hasMap(String name) {
-        return maps.containsKey(name);
-    }
-
-    @Override
-    public void backupTo(String fileName) {
-        // TODO Auto-generated method stub
-    }
-
-    @Override
-    public void flush() {
-        save();
-    }
-
-    @Override
-    public void sync() {
-        save();
-    }
-
-    public synchronized void save() {
-        for (StorageMap<?, ?> map : maps.values())
-            map.save();
-    }
-
-    public boolean isClosed() {
-        return closed;
-    }
-
-    @Override
-    public void close() {
-        close(true);
-    }
-
-    @Override
-    public void closeImmediately() {
-        close(false);
-    }
-
-    private synchronized void close(boolean closeMaps) {
-        closed = true;
-
-        for (StorageMap<?, ?> map : maps.values())
-            map.close();
-
-        maps.clear();
+    private static void backupFile(ZipOutputStream out, InputStream in, String entryName) throws IOException {
+        out.putNextEntry(new ZipEntry(entryName));
+        IOUtils.copyAndCloseInput(in, out);
+        out.closeEntry();
     }
 
 }

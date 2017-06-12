@@ -26,20 +26,18 @@ public interface Storage {
     <K, V> StorageMap<K, V> openMap(String name, String mapType, DataType keyType, DataType valueType,
             Map<String, String> parameters);
 
-    StorageMap<?, ?> getStorageMap(String name);
-
     boolean hasMap(String name);
 
     String nextTemporaryMapName();
 
     void backupTo(String fileName);
 
-    void flush();
-
-    void sync();
+    void save();
 
     void close();
 
     void closeImmediately();
+
+    boolean isClosed();
 
 }

@@ -189,12 +189,12 @@ public class Constants {
     /**
      * The default port of the TCP server.
      */
-    public static final int DEFAULT_TCP_PORT = 5210;
+    public static final int DEFAULT_TCP_PORT = 7210;
 
     /**
      * The default port of the P2P server.
      */
-    public static final int DEFAULT_P2P_PORT = 5211;
+    public static final int DEFAULT_P2P_PORT = 7211;
 
     public static final String DEFAULT_HOST = "localhost";
 
@@ -375,6 +375,9 @@ public class Constants {
     public static final int QUERY_STATISTICS_MAX_ENTRIES = 100;
 
     public static final boolean IS_WINDOWS = System.getProperty("os.name").startsWith("Windows");
+
+    // 为了避免模块之间在编译期存在依赖，有些地方会用到反射，在这里统一定义类名
+    public static final String REFLECTION_JDBC_CONNECTION = "org.lealone.client.jdbc.JdbcConnection";
 
     private Constants() {
         // utility class

@@ -15,32 +15,37 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.lealone.storage.type;
+package org.lealone.aose.storage;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
-public class WriteBufferPool {
-    // 不要求精确
-    private static int poolSize;
-    private static final int capacity = 4 * 1024 * 1024;
-    private static final ConcurrentLinkedQueue<WriteBuffer> writeBufferPool = new ConcurrentLinkedQueue<>();
+import org.lealone.common.logging.Logger;
+import org.lealone.common.logging.LoggerFactory;
 
-    public static WriteBuffer poll() {
-        WriteBuffer writeBuffer = writeBufferPool.poll();
-        if (writeBuffer == null)
-            writeBuffer = new WriteBuffer();
-        else {
-            writeBuffer.clear();
-            poolSize--;
-        }
+public class AOBalancer extends Thread {
 
-        return writeBuffer;
+    private static final Logger logger = LoggerFactory.getLogger(AOBalancer.class);
+    private static final LinkedBlockingQueue<Runnable> taskQueue = new LinkedBlockingQueue<>();
+
+    public AOBalancer() {
+        super("AOBalancer");
+        setDaemon(true);
     }
 
-    public static void offer(WriteBuffer writeBuffer) {
-        if (poolSize < 5 && writeBuffer.capacity() <= capacity) {
-            poolSize++;
-            writeBufferPool.offer(writeBuffer);
+    @Override
+    public void run() {
+        while (true) {
+            try {
+                Runnable task = taskQueue.take();
+                task.run();
+            } catch (Exception e) {
+                logger.warn("Failed to run task", e);
+            }
         }
     }
+
+    public static void addTask(Runnable task) {
+        taskQueue.add(task);
+    }
+
 }

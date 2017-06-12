@@ -13,6 +13,8 @@
  */
 package org.lealone.test.aose;
 
+import java.util.HashMap;
+
 import org.lealone.aose.storage.AOStorage;
 import org.lealone.aose.storage.AOStorageBuilder;
 import org.lealone.aose.storage.BufferedMap;
@@ -59,13 +61,20 @@ public class AOStorageTest extends TestBase {
 
             // openRTreeMap();
             // testRTreePut();
+
+            testBackupTo();
         } finally {
             storage.close();
         }
     }
 
+    void testBackupTo() {
+        String fileName = joinDirs("testBackup", "backup1.zip");
+        storage.backupTo(fileName);
+    }
+
     void testBufferedMap() {
-        BufferedMap<Integer, String> bmap = storage.openBufferedMap("testBufferedMap", null, null);
+        BufferedMap<Integer, String> bmap = storage.openBufferedMap("testBufferedMap", null, null, null);
         p(bmap.firstKey());
 
         for (int i = 10; i < 20; i += 2) {
@@ -168,7 +177,10 @@ public class AOStorageTest extends TestBase {
     }
 
     void openMap() {
-        map = storage.openBTreeMap("testBTreeMap", StringDataType.INSTANCE, StringDataType.INSTANCE, null);
+        HashMap<String, String> parameters = new HashMap<>();
+        parameters.put("isShardingMode", "true");
+        parameters.put("initReplicationEndpoints", "a&b&c");
+        map = storage.openBTreeMap("testBTreeMap", StringDataType.INSTANCE, StringDataType.INSTANCE, parameters);
         p(storage.getMapNames());
     }
 
